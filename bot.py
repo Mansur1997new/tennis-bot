@@ -1,14 +1,17 @@
 import logging
 import asyncio
-import aiohttp
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import requests
 
-TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш реальный токен
+# ===== НАСТРОЙКИ =====
+TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш Telegram токен
+SCRAPINGANT_API_KEY = "f4927ef64d25404f9cb3acdea0e699d3"  # Вставьте ключ от ScrapingAnt
 BREAK_THRESHOLD = 4
 CHECK_INTERVAL = 25
+# =====================
 
 logging.basicConfig(level=logging.INFO)
 CHAT_ID = None
@@ -43,44 +46,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с Sofascore API (прямые запросы) ---
-async def get_live_tennis_matches():
+# --- Функции для работы с Sofascore через ScrapingAnt ---
+def get_live_tennis_matches():
     url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/"
-    }
+    # Используем ScrapingAnt как прокси
+    proxy_url = f"https://api.scrapingant.com/v2/general?url={url}&x-api-key={SCRAPINGANT_API_KEY}&browser=false"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    events = data.get('events', [])
-                    logging.info(f"Найдено живых теннисных матчей: {len(events)}")
-                    return events
-                else:
-                    logging.warning(f"API вернул статус: {response.status}")
-                    return []
+        response = requests.get(proxy_url)
+        if response.status_code == 200:
+            data = response.json()
+            events = data.get('events', [])
+            logging.info(f"Найдено живых теннисных матчей: {len(events)}")
+            return events
+        else:
+            logging.warning(f"API вернул статус: {response.status_code}")
+            return []
     except Exception as e:
         logging.error(f"Ошибка получения матчей: {e}")
         return []
 
-async def get_match_incidents(match_id):
+def get_match_incidents(match_id):
     url = f"https://api.sofascore.com/api/v1/event/{match_id}/incidents"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/"
-    }
+    proxy_url = f"https://api.scrapingant.com/v2/general?url={url}&x-api-key={SCRAPINGANT_API_KEY}&browser=false"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get('incidents', [])
-                else:
-                    return []
+        response = requests.get(proxy_url)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('incidents', [])
+        else:
+            return []
     except Exception as e:
         logging.error(f"Ошибка получения инцидентов: {e}")
         return []
@@ -138,7 +132,7 @@ async def analysis_loop():
     logging.info("🔄 Запущен цикл анализа матчей...")
     while True:
         try:
-            matches = await get_live_tennis_matches()
+            matches = get_live_tennis_matches()
             if not matches:
                 logging.info("Нет живых теннисных матчей")
             else:
@@ -147,7 +141,7 @@ async def analysis_loop():
                     match_id = match.get('id')
                     if not match_id:
                         continue
-                    incidents = await get_match_incidents(match_id)
+                    incidents = get_match_incidents(match_id)
                     if incidents:
                         triggered, count = analyze_breaks(match_id, incidents)
                         if triggered:
