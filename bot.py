@@ -6,8 +6,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # ===== НАСТРОЙКИ =====
 TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш реальный токен
-BREAK_THRESHOLD = 4        # Количество брейков подряд для уведомления
-CHECK_INTERVAL = 25        # Интервал проверки в секундах
+BREAK_THRESHOLD = 4
+CHECK_INTERVAL = 25
 # =====================
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +37,7 @@ async def get_live_tennis_matches():
                 if response.status == 200:
                     data = await response.json()
                     return data.get('events', [])
+                logging.warning(f"API вернул статус: {response.status}")
                 return []
     except Exception as e:
         logging.error(f"Ошибка получения матчей: {e}")
@@ -68,7 +69,6 @@ def analyze_breaks(match_id, incidents):
     sorted_incidents = sorted(incidents, key=lambda x: x.get('time', 0))
     new_breaks = 0
     last_game = track["last_game"]
-    server_id = None
     
     for incident in sorted_incidents:
         if incident.get('type') == 'game':
@@ -77,11 +77,9 @@ def analyze_breaks(match_id, incidents):
                 continue
             winner = incident.get('winner', {}).get('id')
             server = incident.get('server', {}).get('id')
-            # Если подающий есть и он не победитель -> брейк
             if server and winner and server != winner:
                 new_breaks += 1
             else:
-                # Если брейка не было, сбрасываем серию
                 track["breaks"] = 0
             last_game = game_num
     
@@ -95,34 +93,11 @@ def analyze_breaks(match_id, incidents):
     
     return False, None
 
-# --- Фоновый цикл ---
-async def analysis_loop():
-    while True:
-        try:
-            matches = await get_live_tennis_matches()
-            for match in matches:
-                match_id = match.get('id')
-                if not match_id:
-                    continue
-                incidents = await get_match_incidents(match_id)
-                if incidents:
-                    triggered, count = analyze_breaks(match_id, incidents)
-                    if triggered:
-                        await send_notification(
-                            f"🎾 {BREAK_THRESHOLD} БРЕЙКА ПОДРЯД!\n"
-                            f"Матч: {match.get('homeTeam', {}).get('name', '')} - {match.get('awayTeam', {}).get('name', '')}\n"
-                            f"Серия: {count}"
-                        )
-            await asyncio.sleep(CHECK_INTERVAL)
-        except Exception as e:
-            logging.error(f"Ошибка в цикле: {e}")
-            await asyncio.sleep(60)
-
 # --- Отправка уведомлений ---
 async def send_notification(text):
     global CHAT_ID
     if CHAT_ID is None:
-        logging.warning("CHAT_ID не установлен")
+        logging.warning("CHAT_ID не установлен. Напишите /start")
         return
     try:
         app = Application.builder().token(TOKEN).build()
@@ -130,11 +105,40 @@ async def send_notification(text):
     except Exception as e:
         logging.error(f"Ошибка отправки: {e}")
 
-# --- Запуск бота (исправленный) ---
+# --- Фоновый цикл анализа ---
+async def analysis_loop():
+    logging.info("🔄 Запущен цикл анализа матчей...")
+    while True:
+        try:
+            matches = await get_live_tennis_matches()
+            if not matches:
+                logging.info("Нет живых теннисных матчей")
+            else:
+                logging.info(f"Найдено живых теннисных матчей: {len(matches)}")
+                for match in matches:
+                    match_id = match.get('id')
+                    if not match_id:
+                        continue
+                    incidents = await get_match_incidents(match_id)
+                    if incidents:
+                        triggered, count = analyze_breaks(match_id, incidents)
+                        if triggered:
+                            home = match.get('homeTeam', {}).get('name', 'Игрок 1')
+                            away = match.get('awayTeam', {}).get('name', 'Игрок 2')
+                            await send_notification(
+                                f"🎾 {BREAK_THRESHOLD} БРЕЙКА ПОДРЯД!\n"
+                                f"Матч: {home} - {away}\n"
+                                f"Серия: {count}"
+                            )
+            await asyncio.sleep(CHECK_INTERVAL)
+        except Exception as e:
+            logging.error(f"Ошибка в цикле: {e}")
+            await asyncio.sleep(60)
+
+# --- Запуск бота ---
 def main():
     logging.info("🚀 Бот запущен! Ожидание команд...")
     
-    # Создаём приложение
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
@@ -144,9 +148,10 @@ def main():
     asyncio.set_event_loop(loop)
     loop.create_task(analysis_loop())
     
-    # Запускаем бота в том же цикле
     try:
         app.run_polling()
+    except Exception as e:
+        logging.error(f"Ошибка бота: {e}")
     finally:
         loop.close()
 
