@@ -1,14 +1,15 @@
 import logging
 import asyncio
 import time
+import random
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# ИСПРАВЛЕННЫЙ ИМПОРТ
-from sofascrape import SofaScoreScraper
+# ПРАВИЛЬНЫЙ ИМПОРТ ДЛЯ БИБЛИОТЕКИ sofascrape==0.1.2
+from sofascrape import SofaScore
 
 # ===== НАСТРОЙКИ =====
-TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш токен
+TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш реальный токен
 BREAK_THRESHOLD = 4        # Количество брейков подряд для уведомления
 CHECK_INTERVAL = 25        # Интервал проверки в секундах
 # =====================
@@ -17,8 +18,8 @@ logging.basicConfig(level=logging.INFO)
 CHAT_ID = None
 matches_tracking = {}
 
-# ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ КЛИЕНТА
-client = SofaScoreScraper()
+# ПРАВИЛЬНАЯ ИНИЦИАЛИЗАЦИЯ КЛИЕНТА
+client = SofaScore()
 
 # --- Обработчик команды /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,7 +59,6 @@ def get_live_tennis_matches():
 def get_match_statistics(match_id):
     """Получает детальную статистику матча (включая брейки)"""
     try:
-        # Получаем данные матча
         match_data = client.get_event_data(match_id)
         return match_data
     except Exception as e:
@@ -67,9 +67,6 @@ def get_match_statistics(match_id):
 
 # --- Функция анализа матча на наличие брейков ---
 def analyze_match(match_data):
-    """
-    Анализирует матч и определяет, были ли 4 брейка подряд.
-    """
     match_id = match_data.get('id')
     if not match_id:
         return False, None, None
@@ -83,7 +80,6 @@ def analyze_match(match_data):
     
     try:
         # ВРЕМЕННАЯ ЗАГЛУШКА: случайная симуляция брейков
-        import random
         is_break = random.choice([True, False, False])
         
         if is_break:
