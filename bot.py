@@ -27,32 +27,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с Sofascore API ---
+# --- Функции для работы с Sofascore API (исправлены) ---
 async def get_live_tennis_matches():
+    """Получает список живых теннисных матчей с правильными заголовками"""
     url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.sofascore.com/",
+        "Origin": "https://www.sofascore.com"
+    }
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get('events', [])
-                logging.warning(f"API вернул статус: {response.status}")
-                return []
+                    events = data.get('events', [])
+                    logging.info(f"Найдено живых теннисных матчей: {len(events)}")
+                    return events
+                else:
+                    logging.warning(f"API вернул статус: {response.status}")
+                    return []
     except Exception as e:
         logging.error(f"Ошибка получения матчей: {e}")
         return []
 
 async def get_match_incidents(match_id):
+    """Получает инциденты матча с правильными заголовками"""
     url = f"https://api.sofascore.com/api/v1/event/{match_id}/incidents"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://www.sofascore.com/"
+    }
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data.get('incidents', [])
-                return []
+                else:
+                    logging.warning(f"Ошибка инцидентов {match_id}: статус {response.status}")
+                    return []
     except Exception as e:
         logging.error(f"Ошибка получения инцидентов: {e}")
         return []
@@ -143,15 +160,16 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
-    # Запускаем фоновую задачу
+    # Запускаем фоновую задачу в отдельном потоке
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.create_task(analysis_loop())
     
     try:
-        app.run_polling()
-    except Exception as e:
-        logging.error(f"Ошибка бота: {e}")
+        # Запускаем поллинг в этом же цикле
+        loop.run_until_complete(app.run_polling())
+    except KeyboardInterrupt:
+        logging.info("Бот остановлен")
     finally:
         loop.close()
 
