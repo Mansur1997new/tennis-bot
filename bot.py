@@ -22,6 +22,9 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'OK')
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_http_server():
     server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
@@ -43,82 +46,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с Sofascore API ---
+# --- Функции для работы с Sofascore API (через прокси) ---
 async def get_live_tennis_matches():
-    url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/"
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    events = data.get('events', [])
-                    logging.info(f"Найдено живых теннисных матчей: {len(events)}")
-                    return events
-                else:
-                    logging.warning(f"API вернул статус: {response.status}")
-                    return []
-    except Exception as e:
-        logging.error(f"Ошибка получения матчей: {e}")
-        return []
+    # Здесь будет код с прокси, когда вы выберете сервис
+    logging.info("Поиск живых матчей (прокси пока не настроен)")
+    return []
 
 async def get_match_incidents(match_id):
-    url = f"https://api.sofascore.com/api/v1/event/{match_id}/incidents"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.sofascore.com/"
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get('incidents', [])
-                else:
-                    return []
-    except Exception as e:
-        logging.error(f"Ошибка получения инцидентов: {e}")
-        return []
+    return []
 
-# --- Логика анализа брейков ---
+# --- Логика анализа брейков (заглушка) ---
 def analyze_breaks(match_id, incidents):
-    if match_id not in matches_tracking:
-        matches_tracking[match_id] = {"breaks": 0, "notified": False, "last_game": 0}
-    
-    track = matches_tracking[match_id]
-    if track["notified"]:
-        return False, None
-    
-    sorted_incidents = sorted(incidents, key=lambda x: x.get('time', 0))
-    new_breaks = 0
-    last_game = track["last_game"]
-    
-    for incident in sorted_incidents:
-        if incident.get('type') == 'game':
-            game_num = incident.get('game', {}).get('number', 0)
-            if game_num <= last_game:
-                continue
-            winner = incident.get('winner', {}).get('id')
-            server = incident.get('server', {}).get('id')
-            if server and winner and server != winner:
-                new_breaks += 1
-            else:
-                track["breaks"] = 0
-            last_game = game_num
-    
-    if new_breaks > 0:
-        track["breaks"] += new_breaks
-    track["last_game"] = last_game
-    
-    if track["breaks"] >= BREAK_THRESHOLD:
-        track["notified"] = True
-        return True, track["breaks"]
-    
     return False, None
 
 # --- Отправка уведомлений ---
@@ -133,63 +71,29 @@ async def send_notification(text):
     except Exception as e:
         logging.error(f"Ошибка отправки: {e}")
 
-# --- Фоновый цикл анализа ---
+# --- Фоновый цикл (заглушка) ---
 async def analysis_loop():
     logging.info("🔄 Запущен цикл анализа матчей...")
     while True:
-        try:
-            matches = await get_live_tennis_matches()
-            if not matches:
-                logging.info("Нет живых теннисных матчей")
-            else:
-                logging.info(f"Найдено живых теннисных матчей: {len(matches)}")
-                for match in matches:
-                    match_id = match.get('id')
-                    if not match_id:
-                        continue
-                    incidents = await get_match_incidents(match_id)
-                    if incidents:
-                        triggered, count = analyze_breaks(match_id, incidents)
-                        if triggered:
-                            home = match.get('homeTeam', {}).get('name', 'Игрок 1')
-                            away = match.get('awayTeam', {}).get('name', 'Игрок 2')
-                            await send_notification(
-                                f"🎾 {BREAK_THRESHOLD} БРЕЙКА ПОДРЯД!\n"
-                                f"Матч: {home} - {away}\n"
-                                f"Серия: {count}"
-                            )
-            await asyncio.sleep(CHECK_INTERVAL)
-        except Exception as e:
-            logging.error(f"Ошибка в цикле: {e}")
-            await asyncio.sleep(60)
+        await asyncio.sleep(CHECK_INTERVAL)
 
-# --- Запуск бота (исправленный) ---
+# --- Запуск бота ---
 def main():
     logging.info("🚀 Бот запущен! Ожидание команд...")
     
-    # Создаём приложение
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
-    # Создаём новый цикл событий
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    # Запускаем фоновую задачу
     loop.create_task(analysis_loop())
     
     try:
-        # Запускаем бота в этом же цикле
         loop.run_until_complete(app.run_polling())
     except KeyboardInterrupt:
         logging.info("Бот остановлен")
     finally:
-        # Корректно завершаем задачи
-        pending = asyncio.all_tasks(loop)
-        for task in pending:
-            task.cancel()
-        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
 
 if __name__ == "__main__":
