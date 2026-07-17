@@ -1,9 +1,10 @@
 import logging
 import asyncio
-import random
+import aiohttp
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from sofascrape import SofaScore  # Правильный импорт
 
 # ===== НАСТРОЙКИ =====
 TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш реальный токен
@@ -15,8 +16,19 @@ logging.basicConfig(level=logging.INFO)
 CHAT_ID = None
 matches_tracking = {}
 
-# --- Инициализация клиента Sofascrape ---
-client = SofaScore()
+# --- Простой HTTP-сервер для Render ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'OK')
+
+def run_http_server():
+    server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
+    server.serve_forever()
+
+# Запускаем HTTP-сервер в фоновом потоке
+threading.Thread(target=run_http_server, daemon=True).start()
 
 # --- Обработчики команд ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31,26 +43,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с Sofascore через библиотеку ---
-def get_live_tennis_matches():
-    """Получает список живых теннисных матчей через библиотеку"""
+# --- Функции для работы с Sofascore API ---
+async def get_live_tennis_matches():
+    url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://www.sofascore.com/"
+    }
     try:
-        live_events = client.get_live_events()
-        tennis_matches = []
-        for event in live_events:
-            if event.get('sport') == 'Tennis' or event.get('category') == 'Tennis':
-                tennis_matches.append(event)
-        logging.info(f"Найдено живых теннисных матчей: {len(tennis_matches)}")
-        return tennis_matches
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    events = data.get('events', [])
+                    logging.info(f"Найдено живых теннисных матчей: {len(events)}")
+                    return events
+                else:
+                    logging.warning(f"API вернул статус: {response.status}")
+                    return []
     except Exception as e:
         logging.error(f"Ошибка получения матчей: {e}")
         return []
 
-def get_match_incidents(match_id):
-    """Получает инциденты матча через библиотеку"""
+async def get_match_incidents(match_id):
+    url = f"https://api.sofascore.com/api/v1/event/{match_id}/incidents"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://www.sofascore.com/"
+    }
     try:
-        match_data = client.get_event_data(match_id)
-        return match_data.get('incidents', [])
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get('incidents', [])
+                else:
+                    return []
     except Exception as e:
         logging.error(f"Ошибка получения инцидентов: {e}")
         return []
@@ -108,7 +138,7 @@ async def analysis_loop():
     logging.info("🔄 Запущен цикл анализа матчей...")
     while True:
         try:
-            matches = get_live_tennis_matches()
+            matches = await get_live_tennis_matches()
             if not matches:
                 logging.info("Нет живых теннисных матчей")
             else:
@@ -117,7 +147,7 @@ async def analysis_loop():
                     match_id = match.get('id')
                     if not match_id:
                         continue
-                    incidents = get_match_incidents(match_id)
+                    incidents = await get_match_incidents(match_id)
                     if incidents:
                         triggered, count = analyze_breaks(match_id, incidents)
                         if triggered:
