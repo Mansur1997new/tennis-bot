@@ -163,16 +163,34 @@ async def analysis_loop():
             logging.error(f"Ошибка в цикле: {e}")
             await asyncio.sleep(60)
 
-# --- Запуск бота ---
-async def main():
+# --- Запуск бота (исправленный) ---
+def main():
     logging.info("🚀 Бот запущен! Ожидание команд...")
     
+    # Создаём приложение
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     
-    asyncio.create_task(analysis_loop())
-    await app.run_polling()
+    # Создаём новый цикл событий
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Запускаем фоновую задачу
+    loop.create_task(analysis_loop())
+    
+    try:
+        # Запускаем бота в этом же цикле
+        loop.run_until_complete(app.run_polling())
+    except KeyboardInterrupt:
+        logging.info("Бот остановлен")
+    finally:
+        # Корректно завершаем задачи
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
