@@ -46,18 +46,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с TheSportsDB API ---
+# --- Функции для работы с TheSportsDB API (исправленные) ---
 async def get_live_tennis_matches():
-    """Получает список живых теннисных матчей через TheSportsDB"""
-    # TheSportsDB не имеет прямого эндпоинта для live-матчей,
-    # поэтому получаем расписание на сегодня
-    url = "https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=2026-07-19&s=Tennis"
+    """Получает список теннисных матчей на сегодня"""
+    import datetime
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    url = f"https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d={today}&s=Tennis"
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     events = data.get('events', [])
+                    if events is None:
+                        events = []
                     logging.info(f"Найдено теннисных матчей на сегодня: {len(events)}")
                     return events
                 else:
@@ -67,27 +69,8 @@ async def get_live_tennis_matches():
         logging.error(f"Ошибка получения матчей: {e}")
         return []
 
-async def get_match_details(match_id):
-    """Получает детали матча по ID"""
-    url = f"https://www.thesportsdb.com/api/v1/json/3/lookuptable.php?e={match_id}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get('table', [])
-                else:
-                    return []
-    except Exception as e:
-        logging.error(f"Ошибка получения деталей матча: {e}")
-        return []
-
-# --- Логика анализа (упрощённая для TheSportsDB) ---
+# --- Логика анализа (упрощённая) ---
 def analyze_match(match):
-    """
-    Анализирует матч на наличие брейков.
-    TheSportsDB не даёт детальной статистики, поэтому используем счёт.
-    """
     match_id = match.get('idEvent')
     if not match_id:
         return False, None
@@ -99,12 +82,11 @@ def analyze_match(match):
     if track["notified"]:
         return False, None
     
-    # Получаем счёт по сетам
+    # Получаем счёт
     home_score = match.get('intHomeScore', 0)
     away_score = match.get('intAwayScore', 0)
     
-    # Если разница в счёте больше 1 — возможно, был брейк
-    # Это упрощённая логика для демонстрации
+    # Если разница больше 1 — возможен брейк
     if abs(home_score - away_score) > 1:
         track["breaks"] += 1
         logging.info(f"Матч {match_id}: возможный брейк! Серия: {track['breaks']}")
@@ -140,6 +122,7 @@ async def analysis_loop():
             if not matches:
                 logging.info("Нет теннисных матчей на сегодня")
             else:
+                logging.info(f"Найдено матчей: {len(matches)}")
                 for match in matches:
                     triggered, message = analyze_match(match)
                     if triggered and message:
