@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 CHAT_ID = None
 matches_tracking = {}
 
-# --- HTTP-сервер для Render ---
+# --- HTTP-сервер для Render (он же отвечает на пинги) ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -30,6 +30,7 @@ def run_http_server():
     server = HTTPServer(('0.0.0.0', 10000), HealthCheckHandler)
     server.serve_forever()
 
+# Запускаем HTTP-сервер в фоновом потоке
 threading.Thread(target=run_http_server, daemon=True).start()
 
 # --- Обработчики команд ---
@@ -46,9 +47,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с TheSportsDB API (исправленные) ---
+# --- Функции для работы с TheSportsDB API ---
 async def get_live_tennis_matches():
-    """Получает список теннисных матчей на сегодня"""
     import datetime
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     url = f"https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d={today}&s=Tennis"
@@ -82,11 +82,9 @@ def analyze_match(match):
     if track["notified"]:
         return False, None
     
-    # Получаем счёт
     home_score = match.get('intHomeScore', 0)
     away_score = match.get('intAwayScore', 0)
     
-    # Если разница больше 1 — возможен брейк
     if abs(home_score - away_score) > 1:
         track["breaks"] += 1
         logging.info(f"Матч {match_id}: возможный брейк! Серия: {track['breaks']}")
@@ -122,7 +120,6 @@ async def analysis_loop():
             if not matches:
                 logging.info("Нет теннисных матчей на сегодня")
             else:
-                logging.info(f"Найдено матчей: {len(matches)}")
                 for match in matches:
                     triggered, message = analyze_match(match)
                     if triggered and message:
