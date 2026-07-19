@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # ===== НАСТРОЙКИ =====
 TOKEN = "8831841766:AAGrxasQomUdSAat5KIspw2FhEsvv98mMI4"  # Вставьте ваш Telegram токен
 BREAK_THRESHOLD = 4
-CHECK_INTERVAL = 30  # Увеличил до 30 секунд для экономии
+CHECK_INTERVAL = 30
 # =====================
 
 logging.basicConfig(level=logging.INFO)
@@ -39,18 +39,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     CHAT_ID = chat_id
     await update.message.reply_text(
         f"✅ Бот активирован! Ваш ID: `{chat_id}`\n"
-        f"Отслеживаю теннисные матчи. Уведомлю при {BREAK_THRESHOLD} брейках подряд!\n"
-        f"Использую SportScore API (без ключа)."
+        f"Отслеживаю теннисные матчи. Уведомлю при {BREAK_THRESHOLD} брейках подряд!"
     )
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает. Ожидайте уведомлений.")
 
-# --- Функции для работы с SportScore API (без ключа) ---
+# --- Функции для работы с публичным API SportScore ---
 async def get_live_tennis_matches():
-    """Получает список живых теннисных матчей через SportScore"""
+    """Получает список живых теннисных матчей через публичный API"""
     url = "https://sportscore1.p.rapidapi.com/sports/2/events/live"
-    # Заголовки для прямого доступа (без ключа)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/json"
@@ -64,14 +62,14 @@ async def get_live_tennis_matches():
                     logging.info(f"Найдено живых теннисных матчей: {len(events)}")
                     return events
                 else:
-                    logging.warning(f"SportScore API вернул статус: {response.status}")
+                    logging.warning(f"API вернул статус: {response.status}")
                     return []
     except Exception as e:
         logging.error(f"Ошибка получения матчей: {e}")
         return []
 
 async def get_match_incidents(match_id):
-    """Получает инциденты матча через SportScore"""
+    """Получает инциденты матча через публичный API"""
     url = f"https://sportscore1.p.rapidapi.com/events/{match_id}/incidents"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
